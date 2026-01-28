@@ -168,7 +168,7 @@ def scrape_entries(base_url, start_id, finish_id, language):
     Args:
         base_url: Base URL without anchor
         start_id: Starting ID number
-        finish_id: Ending ID number
+        finish_id: Ending ID number, or "end"/"END" to scrape until no more entries
         language: 'en' for English or 'jp' for Japanese
     
     Returns:
@@ -181,15 +181,39 @@ def scrape_entries(base_url, start_id, finish_id, language):
     if not soup:
         return entries
     
-    print(f"Scraping entries {start_id} to {finish_id}...")
+    # Determine if we should scrape until end
+    scrape_until_end = isinstance(finish_id, str) and finish_id.lower() == 'end'
     
-    for entry_id in range(start_id, finish_id + 1):
-        entry = extract_entry(soup, entry_id, language)
-        if entry:
-            entries.append(entry)
-            print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
-        else:
-            print(f"  Entry {entry_id} not found, skipping...")
+    if scrape_until_end:
+        print(f"Scraping entries from {start_id} to end...")
+        consecutive_misses = 0
+        max_consecutive_misses = 10
+        entry_id = start_id
+        
+        while consecutive_misses < max_consecutive_misses:
+            entry = extract_entry(soup, entry_id, language)
+            if entry:
+                entries.append(entry)
+                consecutive_misses = 0  # Reset counter on success
+                print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
+            else:
+                consecutive_misses += 1
+                if consecutive_misses < max_consecutive_misses:
+                    print(f"  Entry {entry_id} not found ({consecutive_misses}/{max_consecutive_misses} consecutive misses)...")
+            
+            entry_id += 1
+        
+        print(f"  Stopped after {max_consecutive_misses} consecutive missing entries.")
+    else:
+        print(f"Scraping entries {start_id} to {finish_id}...")
+        
+        for entry_id in range(start_id, finish_id + 1):
+            entry = extract_entry(soup, entry_id, language)
+            if entry:
+                entries.append(entry)
+                print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
+            else:
+                print(f"  Entry {entry_id} not found, skipping...")
     
     return entries
 
@@ -329,15 +353,15 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format txt
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang jp --format html
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format both
+  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 250 --lang en --format txt
+  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 200 end --lang jp --format html
+  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 END --lang en --format both
         """
     )
     
     parser.add_argument('url', help='Base URL (without anchor)')
     parser.add_argument('start', type=int, help='Starting ID number')
-    parser.add_argument('finish', type=int, help='Ending ID number')
+    parser.add_argument('finish', help='Ending ID number, or "end"/"END" to scrape until no more entries')
     parser.add_argument('--lang', choices=['en', 'jp'], default='en',
                        help='Language: en for English, jp for Japanese (default: en)')
     parser.add_argument('--format', choices=['txt', 'html', 'both'], default='both',
@@ -345,14 +369,28 @@ Examples:
     
     args = parser.parse_args()
     
-    # Validate number range
-    if args.start > args.finish:
-        print("Error: Start number must be less than or equal to finish number")
+    # Validate start number
+    if args.start < 1:
+        print("Error: Start number must be at least 1")
         sys.exit(1)
     
-    if args.start < 0 or args.finish < 0:
-        print("Error: Start and finish numbers must be non-negative")
-        sys.exit(1)
+    # Parse finish - can be number or "end"/"END"
+    finish_is_end = isinstance(args.finish, str) and args.finish.lower() == 'end'
+    
+    if finish_is_end:
+        finish_id = 'end'
+    else:
+        try:
+            finish_id = int(args.finish)
+            if finish_id < args.start:
+                print("Error: Finish number must be greater than or equal to start number")
+                sys.exit(1)
+            if finish_id < 1:
+                print("Error: Finish number must be at least 1")
+                sys.exit(1)
+        except ValueError:
+            print(f"Error: Finish must be a number or 'end'/'END', got '{args.finish}'")
+            sys.exit(1)
     
     # Remove anchor from URL if present
     base_url = args.url.split('#')[0]
@@ -367,7 +405,8 @@ Examples:
     # Generate output filename
     fname = extract_fname_from_url(base_url)
     lang_suffix = 'en' if args.lang == 'en' else 'jp'
-    base_filename = f"output_{fname}_{args.start}_{args.finish}_{lang_suffix}"
+    finish_str = 'end' if finish_is_end else str(finish_id)
+    base_filename = f"output_{fname}_{args.start}_{finish_str}_{lang_suffix}"
     
     # Export based on format selection
     if args.format in ['txt', 'both']:

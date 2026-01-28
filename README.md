@@ -4,7 +4,8 @@ A Python script to scrape game script dialogue from [trailsinthedatabase.com](ht
 
 ## Features
 
-- Scrape dialogue entries by ID range (e.g., entries 232-250)
+- Scrape dialogue entries by ID range (e.g., entries 1-250, or 200 to end)
+- Scrape until end of entries (use "end" or "END" as finish parameter)
 - Choose between English or Japanese text
 - Export to TXT, HTML, or both formats
 - Automatic text processing (removes newlines, collapses whitespace)
@@ -28,8 +29,8 @@ python scraper.py <URL> <START_ID> <FINISH_ID> [--lang en|jp] [--format txt|html
 ### Arguments
 
 - `URL`: Base URL (without anchor) to the game scripts page
-- `START_ID`: Starting entry ID number
-- `FINISH_ID`: Ending entry ID number
+- `START_ID`: Starting entry ID number (must be at least 1)
+- `FINISH_ID`: Ending entry ID number, or `"end"`/`"END"` to scrape until no more entries are found
 - `--lang`: Language selection (default: `en`)
   - `en`: English text
   - `jp`: Japanese text
@@ -41,14 +42,14 @@ python scraper.py <URL> <START_ID> <FINISH_ID> [--lang en|jp] [--format txt|html
 ### Examples
 
 ```bash
-# Scrape English text, export to TXT only
-python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format txt
+# Scrape from ID 1 to 250, English text, export to TXT only
+python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 250 --lang en --format txt
 
-# Scrape Japanese text, export to HTML only
-python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang jp --format html
+# Scrape from ID 200 to end, Japanese text, export to HTML only
+python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 200 end --lang jp --format html
 
-# Scrape English text, export to both formats
-python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format both
+# Scrape from ID 1 to end, English text, export to both formats
+python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 END --lang en --format both
 ```
 
 ## Output Files
@@ -57,7 +58,9 @@ Output files are named in the format:
 - `output_{fname}_{start}_{finish}_{lang}.txt` - Plain text format
 - `output_{fname}_{start}_{finish}_{lang}.html` - HTML format with styling
 
-Example: `output_t5520_232_250_en.txt`
+Examples:
+- `output_t5520_1_250_en.txt` (when finish is a number)
+- `output_t5520_200_end_jp.html` (when finish is "end")
 
 ## How It Works
 
@@ -77,8 +80,9 @@ Example: `output_t5520_232_250_en.txt`
 ## Error Handling
 
 - Handles missing entries gracefully (skips if ID doesn't exist)
+- When finish is "end"/"END", stops after 10 consecutive missing entries
 - Retries network requests on failure (3 attempts with 1 second delay)
-- Validates URL format and number ranges
+- Validates URL format, start number, and finish number/end option
 - Provides informative error messages
 
 ## Requirements
