@@ -8,12 +8,26 @@ import argparse
 import re
 import sys
 import time
+import json
 from urllib.parse import urlparse, parse_qs
+from typing import Any, Dict, List, Tuple
 
 import requests
 from bs4 import BeautifulSoup
 from prompt_toolkit import prompt
 from prompt_toolkit.validation import Validator, ValidationError
+
+from trailsdb_api import TrailsDbApiError, get_script_detail
+
+
+def debug_log(payload):
+    """Lightweight debug logger writing NDJSON lines for debug mode."""
+    try:
+        with open(r"e:\Workspace\trailsdb-scrapper\.cursor\debug.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        # Logging must never break scraper execution
+        pass
 
 
 def fetch_page(url, retries=3, delay=1):
@@ -87,7 +101,22 @@ def extract_entry(soup, entry_id, language):
     """
     # Find the element with the specific ID
     entry_element = soup.find(id=str(entry_id))
-    
+    # region agent log
+    debug_log({
+        "sessionId": "debug-session",
+        "runId": "initial",
+        "hypothesisId": "H3",
+        "location": "scraper.py:88-89",
+        "message": "Entry element lookup by id",
+        "data": {
+            "entry_id": entry_id,
+            "found_by_id": entry_element is not None,
+            "found_by_name_attr": soup.find(attrs={"name": str(entry_id)}) is not None
+        },
+        "timestamp": int(time.time() * 1000)
+    })
+    # endregion
+
     if not entry_element:
         return None
     
@@ -180,6 +209,20 @@ def scrape_entries(base_url, start_id, finish_id, language):
     
     # Fetch the base page once (entries are likely all on the same page)
     soup = fetch_page(base_url)
+    # region agent log
+    debug_log({
+        "sessionId": "debug-session",
+        "runId": "initial",
+        "hypothesisId": "H1",
+        "location": "scraper.py:181-182",
+        "message": "Fetched base page",
+        "data": {
+            "base_url": base_url,
+            "soup_is_none": soup is None
+        },
+        "timestamp": int(time.time() * 1000)
+    })
+    # endregion
     if not soup:
         return entries
     
@@ -211,6 +254,20 @@ def scrape_entries(base_url, start_id, finish_id, language):
         
         for entry_id in range(start_id, finish_id + 1):
             entry = extract_entry(soup, entry_id, language)
+            # region agent log
+            debug_log({
+                "sessionId": "debug-session",
+                "runId": "initial",
+                "hypothesisId": "H2",
+                "location": "scraper.py:212-213",
+                "message": "Entry extraction result",
+                "data": {
+                    "entry_id": entry_id,
+                    "found": bool(entry)
+                },
+                "timestamp": int(time.time() * 1000)
+            })
+            # endregion
             if entry:
                 entries.append(entry)
                 print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
@@ -232,7 +289,7 @@ def format_entry(number, text, character_name):
     Returns:
         Formatted string
     """
-    return f'{number}. "{text}", {character_name}'
+    return f'"{text}" {character_name}'
 
 
 def export_txt(entries, filename):
@@ -333,6 +390,84 @@ def export_html(entries, filename):
     print(f"Exported {len(entries)} entries to {filename}")
 
 
+def fetch_entries_via_api(
+    url: str,
+    start_id: int,
+    finish_id,
+    language: str,
+) -> List[Tuple[int, str, str]]:
+    """
+    Fetch script entries via the official TrailsDB API instead of HTML scraping.
+
+    This uses the `/api/script/detail/{gameId}/{fname}` endpoint and then
+    performs client-side row slicing based on the `row` field.
+
+    Args:
+        url: Full game-scripts URL (used only to extract game_id and fname).
+        start_id: Starting row number (inclusive).
+        finish_id: Ending row number (inclusive) or 'end' to go to last row.
+        language: 'en' for English or 'jp' for Japanese.
+
+    Returns:
+        List of tuples (number, text, character_name) compatible with the
+        existing export functions.
+    """
+    try:
+        game_id, fname = parse_game_and_fname_from_url(url)
+    except ValueError as exc:
+        print(f"Error parsing URL parameters: {exc}")
+        sys.exit(1)
+
+    try:
+        scripts: List[Dict[str, Any]] = get_script_detail(game_id, fname)
+    except TrailsDbApiError as exc:
+        print(f"API error while fetching script detail: {exc}")
+        sys.exit(1)
+
+    if not scripts:
+        print("No script entries returned by the API. Exiting.")
+        sys.exit(1)
+
+    # Determine whether to slice to an explicit end or until the last row.
+    scrape_until_end = isinstance(finish_id, str) and finish_id.lower() == "end"
+
+    entries: List[Tuple[int, str, str]] = []
+
+    for script in scripts:
+        row_value = script.get("row")
+        if row_value is None:
+            continue
+
+        try:
+            row_num = int(row_value)
+        except (TypeError, ValueError):
+            continue
+
+        if row_num < start_id:
+            continue
+        if not scrape_until_end and row_num > finish_id:
+            continue
+
+        if language == "jp":
+            raw_text = script.get("jpnHtmlText") or script.get("jpnSearchText") or ""
+            character_name = script.get("jpnChrName") or "Unknown"
+        else:
+            raw_text = script.get("engHtmlText") or script.get("engSearchText") or ""
+            character_name = script.get("engChrName") or "Unknown"
+
+        # Replace HTML line breaks with spaces so they don't appear in output.
+        if raw_text:
+            raw_text = re.sub(r"<br\s*/?>", " ", raw_text, flags=re.IGNORECASE)
+
+        processed_text = process_text(raw_text)
+        if not processed_text:
+            continue
+
+        entries.append((row_num, processed_text, character_name))
+
+    return entries
+
+
 def extract_fname_from_url(url):
     """
     Extract fname parameter from URL for output filename.
@@ -346,6 +481,39 @@ def extract_fname_from_url(url):
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
     return params.get('fname', ['output'])[0]
+
+
+def parse_game_and_fname_from_url(url: str) -> Tuple[int, str]:
+    """
+    Parse game_id and fname from a Trails Database game-scripts URL.
+
+    Args:
+        url: Full URL string (e.g. https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6)
+
+    Returns:
+        Tuple of (game_id, fname).
+
+    Raises:
+        ValueError: If required parameters are missing or invalid.
+    """
+    parsed = urlparse(url)
+    params = parse_qs(parsed.query)
+
+    fname_values = params.get("fname")
+    game_id_values = params.get("game_id")
+
+    if not fname_values or not fname_values[0]:
+        raise ValueError("URL must contain a 'fname' query parameter")
+
+    if not game_id_values or not game_id_values[0]:
+        raise ValueError("URL must contain a 'game_id' query parameter")
+
+    try:
+        game_id = int(game_id_values[0])
+    except ValueError as exc:
+        raise ValueError(f"Invalid game_id value: {game_id_values[0]!r}") from exc
+
+    return game_id, fname_values[0]
 
 
 class URLValidator(Validator):
@@ -476,8 +644,8 @@ def run_scraper(url, start_id, finish_id, language, export_format):
     # Remove anchor from URL if present
     base_url = url.split('#')[0]
     
-    # Scrape entries
-    entries = scrape_entries(base_url, start_id, finish_id, language)
+    # Fetch entries via the official API instead of HTML scraping
+    entries = fetch_entries_via_api(base_url, start_id, finish_id, language)
     
     if not entries:
         print("No entries found. Exiting.")
