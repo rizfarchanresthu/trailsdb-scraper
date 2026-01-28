@@ -303,7 +303,8 @@ def export_txt(entries, filename):
     with open(filename, 'w', encoding='utf-8') as f:
         for number, text, character_name in entries:
             formatted = format_entry(number, text, character_name)
-            f.write(formatted + '\n')
+            # Write an extra newline so there is a blank line between entries
+            f.write(formatted + '\n\n')
     
     print(f"Exported {len(entries)} entries to {filename}")
 
