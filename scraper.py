@@ -12,6 +12,8 @@ from urllib.parse import urlparse, parse_qs
 
 import requests
 from bs4 import BeautifulSoup
+from prompt_toolkit import prompt
+from prompt_toolkit.validation import Validator, ValidationError
 
 
 def fetch_page(url, retries=3, delay=1):
@@ -168,7 +170,7 @@ def scrape_entries(base_url, start_id, finish_id, language):
     Args:
         base_url: Base URL without anchor
         start_id: Starting ID number
-        finish_id: Ending ID number
+        finish_id: Ending ID number, or "end"/"END" to scrape until no more entries
         language: 'en' for English or 'jp' for Japanese
     
     Returns:
@@ -181,15 +183,39 @@ def scrape_entries(base_url, start_id, finish_id, language):
     if not soup:
         return entries
     
-    print(f"Scraping entries {start_id} to {finish_id}...")
+    # Determine if we should scrape until end
+    scrape_until_end = isinstance(finish_id, str) and finish_id.lower() == 'end'
     
-    for entry_id in range(start_id, finish_id + 1):
-        entry = extract_entry(soup, entry_id, language)
-        if entry:
-            entries.append(entry)
-            print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
-        else:
-            print(f"  Entry {entry_id} not found, skipping...")
+    if scrape_until_end:
+        print(f"Scraping entries from {start_id} to end...")
+        consecutive_misses = 0
+        max_consecutive_misses = 10
+        entry_id = start_id
+        
+        while consecutive_misses < max_consecutive_misses:
+            entry = extract_entry(soup, entry_id, language)
+            if entry:
+                entries.append(entry)
+                consecutive_misses = 0  # Reset counter on success
+                print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
+            else:
+                consecutive_misses += 1
+                if consecutive_misses < max_consecutive_misses:
+                    print(f"  Entry {entry_id} not found ({consecutive_misses}/{max_consecutive_misses} consecutive misses)...")
+            
+            entry_id += 1
+        
+        print(f"  Stopped after {max_consecutive_misses} consecutive missing entries.")
+    else:
+        print(f"Scraping entries {start_id} to {finish_id}...")
+        
+        for entry_id in range(start_id, finish_id + 1):
+            entry = extract_entry(soup, entry_id, language)
+            if entry:
+                entries.append(entry)
+                print(f"  Found entry {entry_id}: {entry[0]}. \"{entry[1][:50]}...\", {entry[2]}")
+            else:
+                print(f"  Entry {entry_id} not found, skipping...")
     
     return entries
 
@@ -322,43 +348,136 @@ def extract_fname_from_url(url):
     return params.get('fname', ['output'])[0]
 
 
-def main():
-    """Main function to handle command-line arguments and orchestrate scraping."""
-    parser = argparse.ArgumentParser(
-        description='Scrape game script dialogue from trailsinthedatabase.com',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format txt
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang jp --format html
-  python scraper.py "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 232 250 --lang en --format both
-        """
-    )
+class URLValidator(Validator):
+    """Validator for URL input."""
+    def validate(self, document):
+        text = document.text.strip()
+        if not text:
+            raise ValidationError(message='URL cannot be empty')
+        if not text.startswith(('http://', 'https://')):
+            raise ValidationError(message='URL must start with http:// or https://')
+
+
+class NumberValidator(Validator):
+    """Validator for number input."""
+    def validate(self, document):
+        text = document.text.strip()
+        if text and not text.isdigit():
+            raise ValidationError(message='Please enter a valid number')
+
+
+class FinishIDValidator(Validator):
+    """Validator for finish ID input (number or 'end')."""
+    def validate(self, document):
+        text = document.text.strip().lower()
+        if text and text not in ['end', ''] and not text.isdigit():
+            raise ValidationError(message="Please enter a number or 'end'")
+
+
+def get_interactive_inputs():
+    """
+    Get user inputs through interactive prompts.
     
-    parser.add_argument('url', help='Base URL (without anchor)')
-    parser.add_argument('start', type=int, help='Starting ID number')
-    parser.add_argument('finish', type=int, help='Ending ID number')
-    parser.add_argument('--lang', choices=['en', 'jp'], default='en',
-                       help='Language: en for English, jp for Japanese (default: en)')
-    parser.add_argument('--format', choices=['txt', 'html', 'both'], default='both',
-                       help='Export format: txt, html, or both (default: both)')
+    Returns:
+        Tuple of (url, start_id, finish_id, language, export_format)
+    """
+    print("\n" + "="*60)
+    print("  Trails Database Scraper - Interactive Mode")
+    print("="*60 + "\n")
     
-    args = parser.parse_args()
+    # URL input
+    url = prompt(
+        'Enter URL: ',
+        default='https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6',
+        validator=URLValidator(),
+        complete_style='column'
+    ).strip()
     
-    # Validate number range
-    if args.start > args.finish:
-        print("Error: Start number must be less than or equal to finish number")
+    # Start ID input
+    start_input = prompt(
+        'Start ID: ',
+        default='1',
+        validator=NumberValidator()
+    ).strip()
+    start_id = int(start_input) if start_input else 1
+    
+    if start_id < 1:
+        print("Error: Start ID must be at least 1")
         sys.exit(1)
     
-    if args.start < 0 or args.finish < 0:
-        print("Error: Start and finish numbers must be non-negative")
-        sys.exit(1)
+    # Finish ID input
+    finish_input = prompt(
+        "Finish ID (or 'end' to scrape until end): ",
+        default='250',
+        validator=FinishIDValidator()
+    ).strip().lower()
     
+    if finish_input == 'end':
+        finish_id = 'end'
+    elif finish_input == '':
+        # Use default if empty
+        finish_id = 250
+    else:
+        finish_id = int(finish_input)
+        if finish_id < start_id:
+            print("Error: Finish ID must be greater than or equal to start ID")
+            sys.exit(1)
+        if finish_id < 1:
+            print("Error: Finish ID must be at least 1")
+            sys.exit(1)
+    
+    # Language selection
+    print("\nLanguage options:")
+    print("  [1] English (en)")
+    print("  [2] Japanese (jp)")
+    lang_input = prompt(
+        'Select language [1]: ',
+        default='1'
+    ).strip()
+    
+    if lang_input == '2' or lang_input.lower() in ['jp', 'japanese']:
+        language = 'jp'
+    else:
+        language = 'en'
+    
+    # Export format selection
+    print("\nExport format options:")
+    print("  [1] TXT only")
+    print("  [2] HTML only")
+    print("  [3] Both (TXT and HTML)")
+    format_input = prompt(
+        'Select format [3]: ',
+        default='3'
+    ).strip()
+    
+    if format_input == '1':
+        export_format = 'txt'
+    elif format_input == '2':
+        export_format = 'html'
+    else:
+        export_format = 'both'
+    
+    print()  # Empty line for spacing
+    
+    return url, start_id, finish_id, language, export_format
+
+
+def run_scraper(url, start_id, finish_id, language, export_format):
+    """
+    Run the scraper with given parameters.
+    
+    Args:
+        url: Base URL
+        start_id: Starting ID number
+        finish_id: Finish ID (number or 'end')
+        language: 'en' or 'jp'
+        export_format: 'txt', 'html', or 'both'
+    """
     # Remove anchor from URL if present
-    base_url = args.url.split('#')[0]
+    base_url = url.split('#')[0]
     
     # Scrape entries
-    entries = scrape_entries(base_url, args.start, args.finish, args.lang)
+    entries = scrape_entries(base_url, start_id, finish_id, language)
     
     if not entries:
         print("No entries found. Exiting.")
@@ -366,19 +485,86 @@ Examples:
     
     # Generate output filename
     fname = extract_fname_from_url(base_url)
-    lang_suffix = 'en' if args.lang == 'en' else 'jp'
-    base_filename = f"output_{fname}_{args.start}_{args.finish}_{lang_suffix}"
+    lang_suffix = 'en' if language == 'en' else 'jp'
+    finish_is_end = isinstance(finish_id, str) and finish_id.lower() == 'end'
+    finish_str = 'end' if finish_is_end else str(finish_id)
+    base_filename = f"output_{fname}_{start_id}_{finish_str}_{lang_suffix}"
     
     # Export based on format selection
-    if args.format in ['txt', 'both']:
+    if export_format in ['txt', 'both']:
         txt_filename = f"{base_filename}.txt"
         export_txt(entries, txt_filename)
     
-    if args.format in ['html', 'both']:
+    if export_format in ['html', 'both']:
         html_filename = f"{base_filename}.html"
         export_html(entries, html_filename)
     
     print(f"\nScraping complete! Found {len(entries)} entries.")
+
+
+def main():
+    """Main function to handle command-line arguments and orchestrate scraping."""
+    parser = argparse.ArgumentParser(
+        description='Scrape game script dialogue from trailsinthedatabase.com',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Interactive Mode (Default):
+  python scraper.py
+  
+Non-Interactive Mode Examples:
+  python scraper.py --non-interactive "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 250 --lang en --format txt
+  python scraper.py --non-interactive "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 200 end --lang jp --format html
+  python scraper.py --non-interactive "https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6" 1 END --lang en --format both
+        """
+    )
+    
+    parser.add_argument('--non-interactive', action='store_true',
+                       help='Use non-interactive mode with command-line arguments')
+    parser.add_argument('url', nargs='?', help='Base URL (without anchor) - required in non-interactive mode')
+    parser.add_argument('start', nargs='?', type=int, help='Starting ID number - required in non-interactive mode')
+    parser.add_argument('finish', nargs='?', help='Ending ID number, or "end"/"END" - required in non-interactive mode')
+    parser.add_argument('--lang', choices=['en', 'jp'], default='en',
+                       help='Language: en for English, jp for Japanese (default: en)')
+    parser.add_argument('--format', choices=['txt', 'html', 'both'], default='both',
+                       help='Export format: txt, html, or both (default: both)')
+    
+    args = parser.parse_args()
+    
+    # Check if we should use interactive mode
+    if not args.non_interactive:
+        # Interactive mode
+        url, start_id, finish_id, language, export_format = get_interactive_inputs()
+        run_scraper(url, start_id, finish_id, language, export_format)
+        return
+    
+    # Non-interactive mode - validate required arguments
+    if not args.url or args.start is None or not args.finish:
+        parser.error("In non-interactive mode, url, start, and finish are required arguments")
+    
+    # Validate start number
+    if args.start < 1:
+        print("Error: Start number must be at least 1")
+        sys.exit(1)
+    
+    # Parse finish - can be number or "end"/"END"
+    finish_is_end = isinstance(args.finish, str) and args.finish.lower() == 'end'
+    
+    if finish_is_end:
+        finish_id = 'end'
+    else:
+        try:
+            finish_id = int(args.finish)
+            if finish_id < args.start:
+                print("Error: Finish number must be greater than or equal to start number")
+                sys.exit(1)
+            if finish_id < 1:
+                print("Error: Finish number must be at least 1")
+                sys.exit(1)
+        except ValueError:
+            print(f"Error: Finish must be a number or 'end'/'END', got '{args.finish}'")
+            sys.exit(1)
+    
+    run_scraper(args.url, args.start, finish_id, args.lang, args.format)
 
 
 if __name__ == '__main__':
