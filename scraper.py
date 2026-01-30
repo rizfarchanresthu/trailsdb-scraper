@@ -557,7 +557,6 @@ def get_interactive_inputs():
     # URL input
     url = prompt(
         'Enter URL: ',
-        default='https://trailsinthedatabase.com/game-scripts?fname=t5520&game_id=6',
         validator=URLValidator(),
         complete_style='column'
     ).strip()
@@ -616,7 +615,7 @@ def get_interactive_inputs():
     print("  [3] Both (TXT and HTML)")
     format_input = prompt(
         'Select format [3]: ',
-        default='3'
+        default='1'
     ).strip()
     
     if format_input == '1':
