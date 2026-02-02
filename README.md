@@ -16,7 +16,24 @@ A Python script to scrape game script dialogue from [trailsinthedatabase.com](ht
 ## Installation
 
 1. Install Python 3.7 or higher
-2. Install dependencies:
+
+2. (Recommended) Create and activate a virtual environment:
+
+```bash
+# Create virtual environment
+python -m venv venv
+
+# Activate on Windows
+venv\Scripts\activate
+
+# Activate on macOS/Linux
+source venv/bin/activate
+
+# Deactivate when done
+deactivate
+```
+
+3. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
