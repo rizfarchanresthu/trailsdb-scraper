@@ -11,7 +11,7 @@ A Python script to scrape game script dialogue from [trailsinthedatabase.com](ht
 - Choose between English or Japanese text
 - Export to TXT, HTML, or both formats
 - Automatic text processing (removes newlines, collapses whitespace)
-- Formatted output: `{number}. "{text}", {character_name}`
+- Formatted output: `"{text}" {character_name}`
 
 ## Installation
 
@@ -35,7 +35,7 @@ python scraper.py
 The script will prompt you for:
 - **URL**: Base URL with example placeholder
 - **Start ID**: Starting entry ID (default: 1)
-- **Finish ID**: Ending entry ID or "end" to scrape until end (default: 250)
+- **Finish ID**: Ending entry ID or "end" to scrape until end (default: end)
 - **Language**: Select English (en) or Japanese (jp)
 - **Export Format**: Select TXT only, HTML only, or Both
 
@@ -106,26 +106,26 @@ Examples:
 
 ## How It Works
 
-1. Fetches the HTML page from the provided URL
-2. Extracts dialogue entries by ID from the HTML table structure:
-   - Cell 1: ID and number
-   - Cell 2: Character icon (skipped)
-   - Cell 3: English text
-   - Cell 4: Japanese text
-3. Processes text by:
-   - Removing newlines and replacing with spaces
+1. Parses the URL to extract `game_id` and `fname` query parameters
+2. Calls the TrailsDB API (`/api/script/detail/{gameId}/{fname}`) to fetch script data
+3. Filters entries by row number based on start/finish IDs
+4. Extracts text and character name from the API response:
+   - English: `engHtmlText` and `engChrName`
+   - Japanese: `jpnHtmlText` and `jpnChrName`
+5. Processes text by:
+   - Replacing HTML `<br>` tags with spaces
    - Collapsing multiple spaces to single space
    - Stripping leading/trailing whitespace
-4. Formats entries as: `{number}. "{text}", {character_name}`
-5. Exports to selected format(s)
+6. Formats entries as: `"{text}" {character_name}`
+7. Exports to selected format(s)
 
 ## Error Handling
 
-- Handles missing entries gracefully (skips if ID doesn't exist)
-- When finish is "end"/"END", stops after 10 consecutive missing entries
-- Retries network requests on failure (3 attempts with 1 second delay)
-- Validates URL format, start number, and finish number/end option
-- Provides informative error messages
+- Validates URL format and required query parameters (`game_id`, `fname`)
+- Validates start number (must be at least 1) and finish number/end option
+- Handles API errors gracefully with informative error messages
+- Skips entries outside the requested ID range
+- Exits cleanly if no entries are found
 
 ## Requirements
 
