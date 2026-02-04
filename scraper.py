@@ -459,6 +459,10 @@ def fetch_entries_via_api(
         # Replace HTML line breaks with spaces so they don't appear in output.
         if raw_text:
             raw_text = re.sub(r"<br\s*/?>", " ", raw_text, flags=re.IGNORECASE)
+            # Use BeautifulSoup to extract plain text, stripping all HTML tags
+            # This removes audio, source, anchor tags, and any other HTML markup
+            soup = BeautifulSoup(raw_text, 'html.parser')
+            raw_text = soup.get_text(separator=' ', strip=False)
 
         processed_text = process_text(raw_text)
         if not processed_text:
@@ -576,7 +580,7 @@ def get_interactive_inputs():
     # Finish ID input
     finish_input = prompt(
         "Finish ID (or 'end' to scrape until end): ",
-        default='end',
+        default='250',
         validator=FinishIDValidator()
     ).strip().lower()
     
@@ -584,7 +588,7 @@ def get_interactive_inputs():
         finish_id = 'end'
     elif finish_input == '':
         # Use default if empty
-        finish_id = 'end'
+        finish_id = 250
     else:
         finish_id = int(finish_input)
         if finish_id < start_id:
