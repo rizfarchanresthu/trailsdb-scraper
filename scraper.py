@@ -580,7 +580,7 @@ def get_interactive_inputs():
     # Finish ID input
     finish_input = prompt(
         "Finish ID (or 'end' to scrape until end): ",
-        default='250',
+        default='end',
         validator=FinishIDValidator()
     ).strip().lower()
     
@@ -588,7 +588,7 @@ def get_interactive_inputs():
         finish_id = 'end'
     elif finish_input == '':
         # Use default if empty
-        finish_id = 250
+        finish_id = 'end'
     else:
         finish_id = int(finish_input)
         if finish_id < start_id:
@@ -618,7 +618,7 @@ def get_interactive_inputs():
     print("  [2] HTML only")
     print("  [3] Both (TXT and HTML)")
     format_input = prompt(
-        'Select format [3]: ',
+        'Select format [1]: ',
         default='1'
     ).strip()
     

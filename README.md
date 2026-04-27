@@ -75,7 +75,7 @@ Export format options:
   [1] TXT only
   [2] HTML only
   [3] Both (TXT and HTML)
-Select format [3]: 3
+Select format [1]: 1
 ```
 
 ### Non-Interactive Mode
